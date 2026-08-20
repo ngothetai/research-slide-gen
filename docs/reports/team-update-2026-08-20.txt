@@ -1,0 +1,165 @@
+BÁO CÁO TIẾN ĐỘ TUẦN — LẦN 2 (2026-08-20)
+Đề tài: Automatic Slide Updating with User-Defined Dynamic Templates and Natural Language Instructions
+Tài liệu kèm theo: docs/reports/slideagent_experiment.ipynb (đã chạy hoàn thiện 100% cell)
+
+================================================================================
+1. CÔNG VIỆC ĐÃ HOÀN THIỆN TỪ BÁO CÁO LẦN 1 (18/08 -> 20/08)
+================================================================================
+
+Ở báo cáo lần 1, notebook đang chạy dở và dừng ở bước Stage 2 do lỗi tool-calling và thiếu output cho các bước PoC render / Visual QA. Trong đợt này đã xử lý dứt điểm:
+
+1. Fix triệt để các bug kỹ thuật trong codebase SlideAgent:
+   • Tool function signature: Thêm type annotation `price_range_size: int = 1, area_range_size: int = 20` trong `slideagent/tool_functions.py` để LangChain/OpenAI function-calling không bị văng `ValueError` khi serialize schema.
+   • Robust JSON/Markdown Parsing: Xử lý strip markdown fences (```json / ```python) và lọc thẻ suy nghĩ `<think>` trong `sql_generator.py` và `pptx_parser2.py` để tương thích với các model LLM sinh output có bọc code block.
+2. Hoàn thiện và chạy thành công 100% notebook `slideagent_experiment.ipynb`:
+   • Mọi code cell đều đã được thực thi thật trên kernel Python 3.12 (Postgres local 3,000 bản ghi + LLM OpenRouter).
+   • Toàn bộ output (bảng DataFrame tính lại, SQL log, log ReAct agent, hình ảnh render slide Before/After, kết quả overflow check) đã được lưu đầy đủ vào file notebook.
+
+================================================================================
+2. KẾT QUẢ THỰC NGHIỆM CHI TIẾT (GROUND-TRUTH TỪ NOTEBOOK)
+================================================================================
+
+Quy trình end-to-end trên tác vụ: "Based on this slide, please generate a slide for the Beijing Liangxiang sector from 2020 to 2022."
+
+• Stage 1 (Hiểu slide & tham số):
+  - Parse lệnh: Rút trích chính xác filter `city: 'Beijing'`, `block: 'Liangxiang'`, `start_date: '2020-01-01'`, `end_date: '2022-12-31'`.
+  - Data source slide gốc: Rút đúng bảng `beijing_new_house` và các cột `[supply_sets, trade_sets, dim_area]`.
+  - Logic hàm (Four-tuple quadruples): Trích đúng dạng `field-constraint` với bin diện tích 20m² (0-300m²).
+
+• Stage 2 (Truy vấn DB + Tính lại + Tóm tắt Fact-Aware):
+  - SQL sinh tự động: `SELECT supply_sets, trade_sets, dim_area FROM public.beijing_new_house WHERE city = 'Beijing' AND block = 'Liangxiang' AND date_code >= '2020-01-01' AND date_code <= '2022-12-31'`
+  - ReAct Agent: Gọi tool `execute_analysis`, tính toán lại 15 bins diện tích và xuất ra file Excel.
+  - Kết luận tự sinh (Fact-aware):
+    "From 2020-2022, Liangxiang's core supply-demand area was 100-120m2, with upgraded units centered on 140-160m2."
+  - Kiểm chứng độc lập:
+    + Max tổng supply + trade: bin `100-120m²` (Supply: 247, Trans: 183) -> Khớp chính xác kết luận.
+    + Max phân khúc diện tích >= 140m²: bin `140-160m²` (Supply: 174, Trans: 142) -> Khớp chính xác kết luận.
+
+• Stage 4 & 5 (Render PPTX in-place + Visual QA):
+  - PoC Render: Ánh xạ dữ liệu mới trực tiếp vào `source.pptx` thông qua cơ chế edit-in-place (gán `run.text` giữ nguyên formatting, font size, bold, màu sắc, header bảng).
+  - Visual QA: Rasterize slide sang PNG qua LibreOffice + `pdftoppm` ở chuẩn 1600x900, hiển thị trực quan Before/After trong notebook.
+  - Overflow Check (theo OpenAI slide skill): Mở rộng slide với padding, kiểm tra biên ảnh -> Kết quả: `PASS — không tràn khung`.
+
+================================================================================
+3. ĐÁNH GIÁ REPO LIÊN QUAN: DeckUpdateBench (XiaoZhou2024/DeckUpdateBench)
+================================================================================
+
+Qua tìm hiểu repository `XiaoZhou2024/DeckUpdateBench` của cùng tác giả:
+
+1. Mối liên hệ với đề tài:
+   - Đây chính là **bản nâng cấp mở rộng trực tiếp** từ DynaSlide/SlideAgent (từ bài toán cập nhật 1 slide đơn lẻ lên **multi-page report decks**).
+   - Tác giả xây dựng benchmark và agent (DeckAgent) phục vụ cho bài báo tiếp theo (hiện đang under review).
+
+2. Những điểm tiến bộ vượt bậc của DeckUpdateBench:
+   - **Dataset Builder hoàn chỉnh**: Có sẵn 47 bộ template packs chuẩn (`tpl_01` đến `tpl_48`, thiếu `tpl_16`) trong ngành bất động sản (thị trường tổng quan, nhà mới, thứ cấp, giá bán, cung-cầu, phân khúc cao cấp/bình dân...).
+   - **Cơ chế sinh dữ liệu cặp (Source-Target)**: Tự động hóa việc sinh `source.pptx`, `instruction.json`, `target.pptx`, `source.json`, `target.json` qua ma trận tham số và PostgreSQL.
+   - **Hệ thống đánh giá phân tầng**: Định nghĩa rõ ràng 3 cấp độ metric:
+     • Task Success Rate (TSR — toàn bộ deck)
+     • Page Success Rate (PSR — từng trang slide)
+     • Element-Level Accuracy (từng shape / table / chart / text)
+
+3. Điểm hạn chế chí mạng (Vẫn tồn tại ở cả SlideAgent và DeckUpdateBench):
+   - Cả SlideAgent lẫn DeckAgent (trong DeckUpdateBench) **ĐỀU DỪNG LẠI Ở DẠNG DỮ LIỆU CẤU TRÚC (JSON/YAML)**, chưa có module write-back để xuất ra file `.pptx` hoàn chỉnh!
+   - Trích dẫn trực tiếp từ README của DeckUpdateBench:
+     > "The current CLI serializes the recovered report state, instruction patch, and element-level update plan to JSON. It does not export a rewritten PPTX in this repository snapshot."
+
+4. Ý nghĩa đối với hướng nghiên cứu của nhóm:
+   - Việc chúng ta kết hợp **agent-skill (in-place PPTX rendering + Visual QA)** chính là mảnh ghép còn thiếu quan trọng nhất để khép kín chu trình I/O end-to-end mà cả 2 repo của tác giả chưa làm được.
+   - Chúng ta hoàn toàn có thể tận dụng bộ **Dataset Builder và 47 Template Packs của DeckUpdateBench** làm môi trường benchmark chuẩn cho các thử nghiệm ở giai đoạn tiếp theo (Week 4-7).
+
+================================================================================
+4. KẾ HOẠCH CHO GIAI ĐOẠN TIẾP THEO (CHUẨN BỊ BƯỚC VÀO SPRINT CODE & EXPERIMENT)
+================================================================================
+
+1. Đóng gói module Render & Visual QA thành component chuẩn:
+   - Mở rộng cơ chế edit-in-place cho cả biểu đồ (charts), nhiều bảng và nhiều trang (multi-page) thay vì chỉ single-slide.
+2. Tháo bỏ phụ thuộc "phải có database warehouse":
+   - Cho phép người dùng cung cấp bảng số liệu qua file Excel/CSV đính kèm hoặc structured context trong prompt thay vì bắt buộc phải kết nối PostgreSQL backend.
+3. Tích hợp và đánh giá trên tập benchmark của DeckUpdateBench:
+   - Thử nghiệm trên các template phức tạp (`tpl_01` -> `tpl_05`), đo lường độ chính xác theo Task Success Rate và Element-Level Accuracy.
+
+================================================================================
+5. AUDIT ĐỘ VỮNG CỦA BASE PAPER (đánh giá rủi ro trước khi làm literature survey)
+================================================================================
+
+5.1. Trạng thái xuất bản — HỢP LỆ, ĐỦ TƯ CÁCH LÀM BASE PAPER VỀ MẶT HỌC THUẬT
+  • Đã published: Findings of ACL 2026, pages 18263-18297, San Diego, July 2026.
+  • Anthology ID: 2026.findings-acl.909 | DOI: 10.18653/v1/2026.findings-acl.909
+  • ISBN: 979-8-89176-395-1 | bibkey: zhou-etal-2026-automatic
+  • arXiv:2604.17894v1 (submitted 2026-04-20, chỉ có duy nhất v1).
+  • Nhóm tác giả: Beijing Normal University, có funding NSFC 62272050.
+  => Đây là paper qua peer-review thật (Findings track, không phải main conference). Trích dẫn được.
+
+5.2. Artifact — KHÔNG TÁI LẬP ĐƯỢC (đây là rủi ro lớn nhất)
+  Paper §3.4 tuyên bố nguyên văn: "We release all source/target slides (PPTX), the
+  PostgreSQL database dump, YAML metadata, and the three template dictionaries,
+  enabling reproducible end-to-end and component-level evaluation."
+  Kiểm chứng thực tế từng kênh phân phối:
+  • GitHub (link trong bản arXiv): github.com/XiaoZhou2024/SlideAgent
+    - CÓ code pipeline. KHÔNG có dataset, KHÔNG có Postgres dump, KHÔNG có eval script.
+    - Không có file LICENSE (license = null) -> rủi ro pháp lý khi tái sử dụng code.
+    - Commit cuối: 2026-01-09 (repo đứng yên ~7 tháng).
+  • anonymous.4open.science/r/604E (link trong bản camera-ready CHÍNH THỨC trên ACL Anthology)
+    - Link đã CHẾT về mặt chức năng: liệt kê được tên file top-level (có thư mục
+      `dataset_demo`), nhưng mọi request tải file trả `file_not_found`, tải zip trả
+      `repo_not_found`. Không lấy được bất cứ nội dung nào.
+    - Lưu ý: bản chính thức trên Anthology vẫn trỏ link ẩn danh của vòng review,
+      không trỏ về GitHub -> lỗi minh bạch của chính bản xuất bản.
+  • HuggingFace: nhân viên HF (Niels Rogge) mở issue #3 ngày 2026-04-21 đề nghị tác giả
+    release DynaSlide lên HF Datasets. Đến 2026-08-20 (4 tháng): 0 comment, issue vẫn open,
+    tác giả không trả lời. Trong khi đó tác giả merge PR code của người khác trong vòng 1 ngày
+    (PR #1: 25/08->26/08/2025, PR #2: 31/08->01/09/2025).
+    => Tác giả responsive với code, im lặng với yêu cầu dữ liệu.
+  • Không tìm thấy mirror trên HuggingFace / Zenodo / Google Drive.
+  KẾT LUẬN: Toàn bộ 20,036 triples + 1.79M bản ghi Postgres KHÔNG lấy được ở bất kỳ đâu.
+  Không thể tái lập, không thể so sánh trực tiếp với số liệu Table 1 / Table 2 của paper.
+
+5.3. Điểm yếu phương pháp luận (tự tác giả thừa nhận trong Responsible NLP Checklist)
+  • Checklist mục C3 = KHÔNG: "We did not report error bars or multi-run summary statistics
+    because LLM inference ... consumes very high computational resources and time. Due to
+    these resource and time constraints, our results are based on SINGLE RUNS."
+    => Mọi con số trong Table 1 (80.64% / 68.86% ...) là single-run, không có phương sai.
+       Không dùng làm mốc so sánh định lượng đáng tin được.
+  • Metric SR định nghĩa là EXACT MATCH cả nội dung lẫn layout -> quá cứng, phạt cả những
+    cập nhật đúng về mặt ngữ nghĩa nhưng khác cách diễn đạt/format.
+  • Paper §5 tự nhận: "lacks directly comparable baselines" -> không so với PPTAgent,
+    AutoPresent hay bất kỳ method nào khác; chỉ so SlideAgent trên các LLM backbone khác nhau.
+
+5.4. Lệch giữa mô tả trong paper và code public (đã verify trực tiếp trên code)
+  • Paper: 11 statistical functions closed-domain expose cho LLM function-calling.
+    Code: chỉ 1 hàm generic `execute_analysis` -> KHÔNG tái lập được cột `Cls` của Table 1.
+  • Paper §4.1.1: parse layout bằng VLM + IoU >= 0.5, đạt 99.5%.
+    Code: luồng mặc định đọc ground-truth YAML, phần IoU bị comment, dùng nearest-point.
+  • Paper §4.2.4: "repopulates the slide ... ensuring strict preservation of the original
+    layout and visual design". Code: chỉ xuất YAML, không hề ghi ra .pptx.
+  • Paper §4.1.2: interface open-domain tên `synthesize_analytical_table` với 5 thành phần.
+    Code: tên `execute_analysis`, tham số gộp thành quadruples -> lệch tên gọi/arity.
+
+5.5. DeckUpdateBench có thay thế được làm base không? — CHƯA
+  • Bản thân README tự khai: "does not export a rewritten PPTX in this repository snapshot"
+    và "The complete evaluation package will be released with the full benchmark".
+  • `eval.jsonl` chỉ là danh sách sample chạy thành công để truyền sang stage sau,
+    KHÔNG phải bộ tính metric. Chưa có code tính TSR / PSR / Element-Level Accuracy.
+  • Không có LICENSE (license = null).
+  • Link dataset Google Drive trả HTTP 401 khi truy cập ẩn danh -> chưa public.
+  • Phụ thuộc Windows + PowerPoint COM (`pywin32`, marker sys_platform == "win32")
+    -> không chạy trực tiếp trên macOS/Linux ở phần render trang.
+  • Paper tương ứng đang "under anonymous review" -> chưa citable.
+  • Mặt tích cực: phần sinh dữ liệu là thật và chạy được (47 template packs, ma trận tham số,
+    stat functions phong phú hơn nhiều so với con số 11 trong paper SlideAgent).
+
+5.6. KHUYẾN NGHỊ
+  1. VẪN dùng paper ACL Findings 2026 làm base paper để ĐỊNH NGHĨA BÀI TOÁN và trích dẫn
+     (task formulation + motivation). Đây là phần vững nhất của paper.
+  2. TUYỆT ĐỐI KHÔNG hứa trong paper mới rằng sẽ "so sánh với SlideAgent trên DynaSlide" —
+     dataset không tồn tại công khai, sẽ không bảo vệ được trước reviewer.
+  3. Tự dựng benchmark tái lập được (đã có sẵn nền: sandbox generator + Postgres local trong
+     notebook tuần này) và công bố kèm LICENSE rõ ràng. Đây thành một contribution riêng.
+  4. Đóng khung contribution vào đúng lỗ hổng đã được chính hai repo của tác giả thừa nhận:
+     PPTX write-back + kiểm định tính đúng đắn (visual QA / fact-consistency), thay vì
+     cạnh tranh ở phần data-grounding vốn đã là điểm mạnh của họ.
+  5. Rủi ro bị "scoop": DeckUpdateBench đang active (push 2026-08-17) và đã chiếm hướng
+     multi-page deck. Nếu nhóm cũng đi multi-page thuần thì dễ trùng. Nên chọn trục khác biệt
+     (ví dụ: bỏ giả định có sẵn data warehouse — user chỉ có deck + Excel/prompt).
+  6. Mọi số liệu của base paper khi đưa vào survey phải ghi rõ "single-run, no variance
+     reported" để tránh so sánh sai lệch.

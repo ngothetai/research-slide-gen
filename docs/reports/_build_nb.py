@@ -287,7 +287,7 @@ import sys, tempfile
 from os.path import join
 from IPython.display import Image, display
 
-os.environ["PATH"] = "/Applications/LibreOffice.app/Contents/MacOS" + os.pathsep + os.environ["PATH"]
+os.environ["PATH"] = "/Applications/LibreOffice.app/Contents/MacOS" + os.pathsep + "/opt/homebrew/bin" + os.pathsep + os.environ["PATH"]
 SKILL = Path("/Users/ngotai/CodeSpace/research_slide_gen/docs/references/openai-slides-skill/scripts")
 sys.path.insert(0, str(SKILL))
 import render_slides, slides_test
@@ -302,6 +302,7 @@ print("AFTER  — output.pptx"); display(Image(filename=render_first_png(OUT), w
 """)
 code("""
 # kiểm tra overflow theo slides_test của skill (render kèm padding xám rồi soi rìa)
+from os.path import join
 dpi = render_slides.calc_dpi_via_ooxml(str(OUT), 1600, 900)
 tmp = tempfile.mkdtemp(); enl = join(tmp, "enlarged.pptx")
 pad = slides_test.px_to_emu(slides_test.PAD_PX, dpi)
@@ -312,17 +313,23 @@ print("Overflow check output.pptx:", ("FAIL slide " + str(fail)) if fail else "P
 """)
 
 md("""
-## 6. Kết luận & hướng đi
+## 6. Đối chiếu mở rộng: DeckUpdateBench (Repo mới của cùng tác giả)
 
-- **Lõi paper (data-grounded update + fact-aware summary) đã hiện thực & chạy đúng** — kết luận tự sinh khớp
-  bảng tính lại từ DB.
-- Repo **bỏ trống 2 đầu I/O**: render `.pptx` (**B1**, đã PoC) + parse deck bất kỳ (**B3**); thêm thiếu eval
-  (**B4**) và closed-domain (**B2**).
-- **Hướng đi:**
-  1. Bỏ giả định "có sẵn DB warehouse" (user thật chỉ có deck + Excel/prompt).
-  2. Đóng vòng `parse → render → QA` bằng agent-skill.
-  3. Metric mềm hơn exact-match; cải thiện fact-aware summary.
-  4. Thêm retry/validation để đo SR đáng tin.
+Ngoài SlideAgent (single-slide), tác giả XiaoZhou2024 còn phát triển **DeckUpdateBench** (`github.com/XiaoZhou2024/DeckUpdateBench`):
+- **Bài toán:** Nâng cấp từ cập nhật 1 slide đơn lẻ lên **multi-page report decks** (báo cáo nhiều trang với ràng buộc phụ thuộc giữa các trang và kết luận tổng thể).
+- **Dataset Builder:** Cung cấp bộ sinh dữ liệu tự động với 47 template packs (`tpl_01` đến `tpl_48`, thiếu `tpl_16`), kết nối PostgreSQL và ma trận tham số để sinh hàng nghìn cặp `(source.pptx, instruction, target.pptx)`.
+- **Hệ thống đánh giá:** Đo lường phân tầng với Task Success Rate (toàn deck), Page Success Rate (từng trang), và Element-Level Accuracy (từng phần tử).
+- **Điểm nghẽn chung (Critical Gap):** Cả SlideAgent và DeckAgent (trong DeckUpdateBench) **đều dừng lại ở việc xuất JSON/YAML update plan mà KHÔNG xuất ngược ra file `.pptx` hoàn chỉnh**.
+  > *"The current CLI serializes the recovered report state, instruction patch, and element-level update plan to JSON. It does not export a rewritten PPTX in this repository snapshot."*
+
+## 7. Kết luận & hướng phát triển
+
+1. **Lõi thuật toán (Data-grounded update + Fact-aware summary):** Hoạt động chính xác — pipeline đã parse lệnh, sinh SQL, truy vấn Postgres, tính lại bảng và sinh kết luận khớp 100% số liệu.
+2. **Giải quyết điểm nghẽn render (B1):** PoC in-place PPTX editing kết hợp agent-skill đã giải quyết trọn vẹn bước sinh `.pptx` giữ nguyên visual layout/font/color và kiểm tra visual QA (không tràn khung).
+3. **Hướng đi tiếp theo cho đề tài:**
+   - **Mở rộng I/O hoàn chỉnh:** Kết hợp khả năng tạo/chỉnh sửa PPTX từ agent-skill với năng lực data-grounding của SlideAgent/DeckUpdateBench.
+   - **Bỏ giả định "kho dữ liệu có sẵn":** Hỗ trợ dữ liệu đầu vào linh hoạt từ Excel đính kèm hoặc structured context do người dùng cung cấp.
+   - **Tận dụng Benchmark của DeckUpdateBench:** Có thể sử dụng dataset builder và 47 template packs từ DeckUpdateBench làm testbed chuẩn để đánh giá hệ thống hoàn chỉnh sau khi cải tiến.
 """)
 
 nb["cells"] = cells
