@@ -1,0 +1,19 @@
+[project]
+name = "research-slide-gen"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "notebook>=7.6.2",
+    "ruff>=0.16.3",
+    "slideagent",
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/SlideAgent",
+]
+
+[tool.uv.sources]
+slideagent = { workspace = true }

@@ -1,0 +1,35 @@
+Công việc đang làm từ t5 (sau khi chốt đề tài): chạy baseline của base paper (DynaSlide / SlideAgent) để hiểu hệ thống và tìm limitation trước khi cải tiến.
+
+Đã khai phá được:
+- Chạy được baseline end-to-end thật. Nhưng em thấy dataset + DB gốc không public, nên mình phải tự dựng fake data (Postgres local + 1 task mẫu, LLM qua OpenRouter) để ép pipeline chạy.
+- Xác nhận lõi paper chạy đúng: parse lệnh → sinh SQL → query DB → tính lại bảng → tóm tắt fact-aware. Đã verify độc lập: kết luận tự sinh khớp chính xác số liệu tính lại từ DB.
+- Tìm ra các điểm code public thiếu/lệch so với paper:
+  • Không render ra .pptx — chỉ xuất YAML (thiếu hẳn bước render giữ style).
+
+query_filters:   {city, block, project, start_date, end_date, area_range_size, price_range_size}  # tham số rút từ lệnh
+slide_filters:   [ {connection:{table}, select_columns:[...], filters:{...}, fun_tool:{quadruples}} ]  # data source slide gốc
+update_filters:  [ {..., fun_tool:{quadruples, args}, sql_query:[...]} ]   # đã gộp lệnh + SQL
+template_slide:  {slide_size:{width,height}, elements:[...]}               # slide gốc
+output_slide:    {slide_size:{width,height}, elements:[...]}               # slide đã cập nhật (kết quả)
+
+Mỗi element trong output_slide:
+- type: text            # hoặc "table"
+  role: body-text       # slide-title | body-text | caption | table | chart-bar | chart-line
+  layout: {x, y, width, height}     # đơn vị cm
+  text: "..."                       # với element text
+  # với element table thì thay bằng:
+  data: [ {area_range: "0-20m²", "Supply Count": 5, "Trans Count": 4}, ... ]   # list dict
+  args: [...]           # quadruples (logic tính)
+
+Quan trọng là: YAML này là một dạng structured output từ LLM, chỉ giữ nội dung + toạ độ + metadata dữ liệu, không giữ style (font, màu, kiểu bảng, canh lề…). Style chỉ nằm trong file .pptx gốc. Vì vậy để ra được slide cuối vẫn cần một bước render (map YAML này ngược lại pptx) — đúng cái repo đang thiếu.
+
+  • Thiếu nhánh closed-domain: paper expose 11 hàm thống kê cho LLM chọn (function-calling), nhưng repo chỉ có 1 hàm generic execute_analysis (nhánh open-domain) → không tái lập được cột Cls (Table 1). Về tính toán thì hàm generic vẫn ra cùng kết quả, chỉ là không có 11 hàm để đo theo kiểu closed-domain của paper.
+  • Luồng mặc định né VLM parsing (đọc cấu trúc slide từ ground-truth).
+  • Không có script chấm điểm (SR/element-acc); không có retry (call lỗi vẫn in "thành công").
+
+- Em có chút nhận xét: repo mạnh phần data-grounding, yếu ở 2 đầu I/O (render + parse deck thật) — đúng chỗ agent-skill của Claude/OpenAI (pptx) bù được. Đã PoC: render output giữ nguyên layout/font + QA overflow bằng script của skill.
+- 2 phần skills (openai codex, claude) chủ yếu tập trung vào việc từ ngôn ngữ tự nhiên/ structured data input (mô tả design) để ra được file slide .pptx hoàn chỉnh chứ chưa có ground-truth cho các số liệu trên slide.
+
+Quá trình exp đang chạy: đóng gói SlideAgent thành package `slideagent`, dựng notebook chạy thật (setup → baseline từng stage → bảng đối chiếu code↔paper → PoC render → visual QA).
+Notebook đang hoàn thiện ạ
+
